@@ -19,7 +19,9 @@
 
 package hdfs;
 
+import java.io.File;
 import java.lang.management.ManagementFactory;
+import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -29,9 +31,11 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
+import org.apache.commons.io.FileUtils;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.CommonConfigurationKeysPublic;
 import org.apache.hadoop.fs.FileSystem;
+import org.apache.hadoop.fs.FileUtil;
 import org.apache.hadoop.fs.permission.AclEntry;
 import org.apache.hadoop.fs.permission.AclEntryType;
 import org.apache.hadoop.fs.permission.FsAction;
@@ -102,13 +106,26 @@ public class MiniHDFS {
 
         // Set the elasticsearch user directory up
         if (UserGroupInformation.isSecurityEnabled()) {
-            FileSystem fs = dfs.getFileSystem();
-            org.apache.hadoop.fs.Path esUserPath = new org.apache.hadoop.fs.Path("/user/elasticsearch");
-            fs.mkdirs(esUserPath);
-            List<AclEntry> acls = new ArrayList<>();
-            acls.add(new AclEntry.Builder().setType(AclEntryType.USER).setName("elasticsearch").setPermission(FsAction.ALL).build());
-            fs.modifyAclEntries(esUserPath, acls);
-            fs.close();
+            try(FileSystem fs = dfs.getFileSystem()) {
+                org.apache.hadoop.fs.Path esUserPath = new org.apache.hadoop.fs.Path("/user/elasticsearch");
+                fs.mkdirs(esUserPath);
+                List<AclEntry> acls = new ArrayList<>();
+                acls.add(new AclEntry.Builder().setType(AclEntryType.USER).setName("elasticsearch").setPermission(FsAction.ALL).build());
+                fs.modifyAclEntries(esUserPath, acls);
+
+                Path tempDirectory = Files.createTempDirectory(MiniHDFS.class.getName());
+
+                URL inputUrl = MiniHDFS.class.getClassLoader().getResource("readonly_hdfs_repository.tar.gz");
+                File outputFile = tempDirectory.resolve("readonly_hdfs_repository.tar.gz").toFile();
+                FileUtils.copyURLToFile(inputUrl, outputFile);
+                FileUtil.unTar(outputFile, tempDirectory.toFile());
+
+                fs.copyFromLocalFile(true, true,
+                    new org.apache.hadoop.fs.Path(tempDirectory.resolve("readonly_hdfs_repository").toAbsolutePath().toUri()),
+                    new org.apache.hadoop.fs.Path("hdfs:///tmp/readonly_hdfs_repository"));
+
+                FileUtils.deleteDirectory(tempDirectory.toFile());
+            }
         }
 
         // write our PID file
